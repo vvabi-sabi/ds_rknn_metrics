@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 
-class UltralytDetector():
+class UltralytDetector(): # host
     CONF_TH = 0.25
     IOU_TH = 0.6
 
@@ -27,7 +27,7 @@ class UltralytDetector():
         
 
 
-class RKNNDetector:
+class RKNNDetector: # rockchip
     CONF_TH = 0.25
     IOU_TH = 0.6
 
