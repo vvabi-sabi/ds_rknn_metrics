@@ -28,11 +28,8 @@ class UltralytDetector():
 
 
 class RKNNDetector:
-
-    CONF_TH = 0.5
-    """The confidence threshold for the results of the onnx model."""
-    IOU_TH = 0.5
-    """The threshold of intersection over union for the results of the onnx model."""
+    CONF_TH = 0.25
+    IOU_TH = 0.6
 
     def create_rknn_session(self, model_path, core_mask):
         from rknnlite.api import RKNNLite
@@ -40,11 +37,9 @@ class RKNNDetector:
         ret = rknn_lite.load_rknn(model_path)
         if ret:
             raise OSError(f"{model_path}: Export rknn model failed!")
-
         ret = rknn_lite.init_runtime(async_mode=True, core_mask=core_mask)
         if ret:
             raise OSError(f"{model_path}: Init runtime enviroment failed!")
-
         return rknn_lite
 
     def __init__(self, model_path: str, core_mask = 0):
@@ -69,17 +64,13 @@ class RKNNDetector:
         r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
         if not scaleup:  # only scale down, do not scale up (for better val mAP)
             r = min(r, 1.0)
-
         # Compute padding
         new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
         dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
-
         if auto:  # minimum rectangle
             dw, dh = np.mod(dw, stride), np.mod(dh, stride)  # wh padding
-
         dw /= 2  # divide padding into 2 sides
         dh /= 2
-
         if shape[::-1] != new_unpad:  # resize
             im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
         top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
@@ -97,7 +88,6 @@ class RKNNDetector:
         )
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = np.expand_dims(img, axis=0).astype(np.float32)
-
         return img, ratio, dwdh
 
     def inference(self, img: np.ndarray) -> np.ndarray | None:
@@ -124,10 +114,8 @@ class RKNNDetector:
         p_num = 4
         mc = c // p_num
         y = position.reshape(n, p_num, mc, h, w)
-
         exp_y = np.exp(y)
         y = exp_y / np.sum(exp_y, axis=2, keepdims=True)
-
         acc_metrix = np.arange(mc).reshape(1, 1, mc, 1, 1).astype(float)
         return np.sum(y * acc_metrix, axis=2)
 
@@ -138,12 +126,10 @@ class RKNNDetector:
         stride = np.array([self.net_size // grid_h, self.net_size // grid_w]).reshape(
             1, 2, 1, 1
         )
-
         position = self.dfl(position)
         box_xy = grid + 0.5 - position[:, 0:2, :, :]
         box_xy2 = grid + 0.5 + position[:, 2:4, :, :]
         xyxy = np.concatenate((box_xy * stride, box_xy2 * stride), axis=1)
-
         return xyxy
 
     def post_process(
@@ -152,32 +138,25 @@ class RKNNDetector:
         def sp_flatten(_in):
             ch = _in.shape[1]
             return _in.transpose(0, 2, 3, 1).reshape(-1, ch)
-
         defualt_branch = 3
         pair_per_branch = len(outputs) // defualt_branch
-
         boxes, classes_conf, scores = [], [], []
         for i in range(defualt_branch):
             boxes.append(self.box_process(outputs[pair_per_branch * i]))
             classes_conf.append(sp_flatten(outputs[pair_per_branch * i + 1]))
             scores.append(np.ones_like(classes_conf[-1][:, :1], dtype=np.float32))
-
         boxes = np.concatenate([sp_flatten(b) for b in boxes])
         classes_conf = np.concatenate(classes_conf)
         scores = np.concatenate(scores).flatten()
-
         boxes, classes, scores = self.filter_boxes(boxes, scores, classes_conf)
-
         indices = cv2.dnn.NMSBoxes(
             boxes.tolist(), scores.tolist(), self.CONF_TH, self.IOU_TH
         )
         if isinstance(indices, tuple):
             return None, None, None
-
         boxes = boxes[indices]
         classes = classes[indices]
         scores = scores[indices]
-
         return boxes, classes, scores
 
     def run(self, img: np.ndarray) -> list:
@@ -187,12 +166,10 @@ class RKNNDetector:
         outputs = self.inference(pre_img)
         if outputs is not None:
             boxes, classes, scores = self.post_process(outputs)
-
             if boxes is not None:
                 boxes -= np.array(dwdh * 2)
                 boxes /= ratio
                 boxes = boxes.round().astype(np.int32)
-
                 for box, score, cl in zip(boxes, scores, classes):
                     x0, y0, x1, y1 = map(int, box)
                     #print('x0, y0, x1, y1, cl, score', x0, y0, x1, y1, cl, score)
